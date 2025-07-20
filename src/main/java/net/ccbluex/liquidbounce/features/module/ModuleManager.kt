@@ -219,7 +219,7 @@ object ModuleManager : Listenable, Collection<Module> by MODULE_REGISTRY {
             AutoPlace,
             AutoHitselect,
             CombatHelper,
-            CaptchaSlover()
+            CaptchaSlover
         )
 
         registerModules(modules = modules)
