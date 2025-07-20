@@ -8,9 +8,9 @@ import net.ccbluex.liquidbounce.utils.io.HttpClient
 import net.ccbluex.liquidbounce.utils.io.post
 import net.minecraft.item.ItemMap
 import net.minecraft.item.ItemStack
-import net.minecraft.nbt.NBTTagCompound
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 
 class CaptchaSolver : Module("CaptchaSolver", Category.MISC) {
@@ -40,34 +40,52 @@ class CaptchaSolver : Module("CaptchaSolver", Category.MISC) {
         val stack: ItemStack? = player.inventory.mainInventory.getOrNull(0)
         if (stack?.item !is ItemMap) return
 
-        val mapData: ByteArray? = stack.tagCompound?.getByteArray("data")
-        if (mapData != null) {
-            val dataString = mapData.joinToString(",")
-            if (dataString == lastMapData) return
-            lastMapData = dataString
+        // Get the map ID from the item and retrieve the MapData
+        val mapId = ItemMap.getMapId(stack, MinecraftInstance.mc.theWorld)
+        val mapData = ItemMap.loadMapData(mapId, MinecraftInstance.mc.theWorld) ?: return
 
-            println("[CaptchaSolver] Sending image data to OCR...")
+        // Get the raw color buffer (128x128 = 16384 bytes)
+        val colorBuffer: ByteArray = mapData.colors
 
-            coroutineScope.launch(Dispatchers.IO) {
-                try {
-                    val json = JSONObject().apply { put("image", dataString) }
-                    val body = RequestBody.create(
-                        "application/json".toMediaTypeOrNull(),
-                        json.toString()
-                    )
-                    val response = HttpClient.post(apiEndpoint, body)
-                    val result = JSONObject(response.body?.string()).optString("result", "")
+        // Convert byte array to unsigned int list for JSON
+        val colorList = colorBuffer.map { it.toInt() and 0xFF }
 
-                    if (result.isNotBlank()) {
-                        withContext(Dispatchers.Main) {
-                            MinecraftInstance.mc.thePlayer.sendChatMessage(result)
-                        }
-                    } else {
-                        println("[CaptchaSolver] No result returned from OCR.")
-                    }
-                } catch (e: Exception) {
-                    println("[CaptchaSolver] Error during OCR request: ${e.message}")
+        // Check for duplication to avoid resending same map
+        val currentMapHash = colorList.joinToString(",")
+        if (currentMapHash == lastMapData) {
+            println("[CaptchaSolver] Debug: map data unchanged, skipping.")
+            return
+        }
+
+        lastMapData = currentMapHash
+        println("[CaptchaSolver] Debug: sending map buffer to OCR...")
+
+        // Launch background coroutine to send to OCR API
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val json = JSONObject().apply {
+                    put("image", JSONArray(colorList))
                 }
+
+                val body = RequestBody.create(
+                    "application/json".toMediaTypeOrNull(),
+                    json.toString()
+                )
+
+                val response = HttpClient.post(apiEndpoint, body)
+                val responseBody = response.body?.string()
+
+                val result = JSONObject(responseBody).optString("result", "")
+                if (result.isNotBlank()) {
+                    println("[CaptchaSolver] Debug: OCR result = $result")
+                    withContext(Dispatchers.Main) {
+                        MinecraftInstance.mc.thePlayer.sendChatMessage(result)
+                    }
+                } else {
+                    println("[CaptchaSolver] Debug: OCR returned empty result.")
+                }
+            } catch (e: Exception) {
+                println("[CaptchaSolver] Error: ${e.message}")
             }
         }
     }
