@@ -41,7 +41,8 @@ class CaptchaSolver : Module("CaptchaSolver", Category.MISC) {
         if (stack?.item !is ItemMap) return
 
         // Get the map ID from the item and retrieve the MapData
-        val mapId = ItemMap.getMapId(stack, MinecraftInstance.mc.theWorld)
+        val mapId = stack.metadata // or stack.itemDamage depending on mapping
+        
         val mapData = ItemMap.loadMapData(mapId, MinecraftInstance.mc.theWorld) ?: return
 
         // Get the raw color buffer (128x128 = 16384 bytes)
